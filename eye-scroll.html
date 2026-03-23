@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>👁️ Eye Scroll</title>
+
+<!-- MediaPipe 런타임 (가장 안정적) -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap');
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --card: #1a1a26;
+  --accent: #00f5c4;
+  --accent2: #7b61ff;
+  --warn: #ff9f43;
+  --danger: #ff6b6b;
+  --text: #e8e8f0;
+  --muted: #5a5a7a;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+header {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 100;
+  background: rgba(10,10,15,0.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(0,245,196,0.12);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 52px;
+}
+
+.logo {
+  font-size: 18px; font-weight: 800;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.badge {
+  display: flex; align-items: center; gap: 7px;
+  font-family: 'Space Mono', monospace; font-size: 11px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 20px; padding: 4px 11px;
+}
+
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted); flex-shrink: 0; transition: all 0.3s;
+}
+.dot.green  { background: var(--accent); box-shadow: 0 0 7px var(--accent); animation: pulse 1.5s infinite; }
+.dot.yellow { background: var(--warn); box-shadow: 0 0 7px var(--warn); }
+.dot.red    { background: var(--danger); }
+
+@keyframes pulse {
+  0%,100% { opacity:1; transform:scale(1); }
+  50%      { opacity:0.5; transform:scale(0.75); }
+}
+
+#statusTxt { color: var(--text); }
+
+.app { display: flex; height: 100vh; padding-top: 52px; }
+
+.panel {
+  width: 300px; min-width: 300px;
+  background: var(--surface);
+  border-right: 1px solid rgba(255,255,255,0.05);
+  overflow-y: auto; display: flex; flex-direction: column;
+}
+.panel::-webkit-scrollbar { width: 3px; }
+.panel::-webkit-scrollbar-thumb { background: rgba(0,245,196,0.2); border-radius: 2px; }
+
+.sec { padding: 16px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+.sec-title {
+  font-family: 'Space Mono', monospace; font-size: 9px;
+  letter-spacing: 2px; color: var(--muted);
+  text-transform: uppercase; margin-bottom: 12px;
+}
+
+.cam-wrap {
+  position: relative; border-radius: 10px; overflow: hidden;
+  background: #000; aspect-ratio: 4/3;
+  border: 1px solid rgba(0,245,196,0.15);
+}
+
+#video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+#overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%; transform: scaleX(-1); pointer-events: none;
+}
+
+.cam-tag {
+  position: absolute; bottom: 7px; left: 7px;
+  font-family: 'Space Mono', monospace; font-size: 9px;
+  color: var(--accent); background: rgba(0,0,0,0.65);
+  padding: 2px 6px; border-radius: 3px;
+}
+
+.eye-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.eye-box {
+  background: var(--card); border-radius: 8px; padding: 10px;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.eye-lbl { font-size: 9px; font-family: 'Space Mono', monospace; color: var(--muted); margin-bottom: 6px; }
+.bar-bg { height: 3px; background: rgba(255,255,255,0.07); border-radius: 2px; overflow: hidden; margin-bottom: 5px; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.08s; }
+.eye-num { font-family: 'Space Mono', monospace; font-size: 14px; font-weight: 700; }
+
+.compass-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.compass {
+  width: 90px; height: 90px;
+  border: 1.5px solid rgba(0,245,196,0.2); border-radius: 50%;
+  position: relative;
+  background: radial-gradient(circle, rgba(0,245,196,0.04) 0%, transparent 70%);
+}
+.compass svg { position: absolute; inset: 0; }
+.gaze-pt {
+  width: 14px; height: 14px; background: var(--accent); border-radius: 50%;
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  box-shadow: 0 0 12px var(--accent); transition: all 0.1s ease-out;
+}
+#gazeLbl { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 1px; min-height: 16px; }
+
+.ctrl { margin-bottom: 12px; }
+.ctrl:last-child { margin-bottom: 0; }
+.ctrl-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.ctrl-name { font-size: 12px; }
+.ctrl-val { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--accent); }
+
+input[type=range] { -webkit-appearance: none; width: 100%; height: 3px; background: rgba(255,255,255,0.08); border-radius: 2px; outline: none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); cursor: pointer; box-shadow: 0 0 5px var(--accent); }
+
+.btn { width: 100%; padding: 12px; border: none; border-radius: 9px; font-family: 'Syne', sans-serif; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.2s; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-go { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #0a0a0f; }
+.btn-go:not(:disabled):hover { transform: translateY(-1px); box-shadow: 0 5px 18px rgba(0,245,196,0.25); }
+.btn-stop { background: linear-gradient(135deg, var(--danger), var(--warn)); color: #0a0a0f; }
+.btn-reset { background: var(--card); color: var(--muted); border: 1px solid rgba(255,255,255,0.06); margin-top: 8px; font-size: 11px; }
+.btn-reset:hover { color: var(--text); }
+
+.stats { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.stat { background: var(--card); border-radius: 7px; padding: 9px 10px; border: 1px solid rgba(255,255,255,0.04); }
+.stat-n { font-family: 'Space Mono', monospace; font-size: 18px; font-weight: 700; color: var(--accent); }
+.stat-l { font-size: 10px; color: var(--muted); margin-top: 1px; }
+
+.content { flex: 1; overflow-y: auto; padding: 28px 36px; }
+.content::-webkit-scrollbar { width: 3px; }
+.content::-webkit-scrollbar-thumb { background: rgba(0,245,196,0.25); border-radius: 2px; }
+
+.content h1 {
+  font-size: clamp(26px, 3.5vw, 44px); font-weight: 800; letter-spacing: -1px; line-height: 1.1;
+  background: linear-gradient(135deg, var(--text) 40%, var(--accent));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px;
+}
+.content .sub { color: var(--muted); font-size: 14px; line-height: 1.6; max-width: 460px; margin-bottom: 32px; }
+
+.card { background: var(--card); border: 1px solid rgba(255,255,255,0.05); border-radius: 14px; padding: 24px; margin-bottom: 16px; transition: border-color 0.3s; }
+.card:hover { border-color: rgba(0,245,196,0.18); }
+.tag { display: inline-block; font-family: 'Space Mono', monospace; font-size: 9px; letter-spacing: 1.5px; color: var(--accent); background: rgba(0,245,196,0.07); border: 1px solid rgba(0,245,196,0.18); border-radius: 3px; padding: 2px 7px; margin-bottom: 10px; text-transform: uppercase; }
+.card h2 { font-size: 17px; font-weight: 700; margin-bottom: 8px; line-height: 1.3; }
+.card p  { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.img-ph { height: 130px; background: linear-gradient(135deg, rgba(123,97,255,0.12), rgba(0,245,196,0.06)); border-radius: 8px; margin-top: 14px; display: flex; align-items: center; justify-content: center; font-size: 36px; border: 1px solid rgba(255,255,255,0.04); }
+
+.flash { position: fixed; top: 52px; left: 300px; right: 0; bottom: 0; pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.12s; }
+#fUp   { background: linear-gradient(to bottom, rgba(0,245,196,0.09), transparent 40%); }
+#fDown { background: linear-gradient(to top, rgba(123,97,255,0.09), transparent 40%); }
+.flash.show { opacity: 1; }
+
+#loadScreen {
+  position: fixed; inset: 0; background: var(--bg); z-index: 999;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  transition: opacity 0.4s;
+}
+.load-eye { font-size: 56px; animation: blink 2.5s infinite; }
+@keyframes blink { 0%,88%,100% { transform:scaleY(1); } 94% { transform:scaleY(0.08); } }
+.load-title { font-size: 22px; font-weight: 800; background: linear-gradient(90deg, var(--accent), var(--accent2)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.load-bar-bg { width: 200px; height: 2px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+.load-bar { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); width: 0%; transition: width 0.3s; }
+#loadMsg { font-family: 'Space Mono', monospace; font-size: 11px; color: var(--muted); text-align: center; max-width: 320px; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div id="loadScreen">
+  <div class="load-eye">👁️</div>
+  <div class="load-title">Eye Scroll</div>
+  <div class="load-bar-bg"><div class="load-bar" id="loadBar"></div></div>
+  <div id="loadMsg">초기화 중...</div>
+</div>
+
+<div class="flash" id="fUp"></div>
+<div class="flash" id="fDown"></div>
+
+<header>
+  <div class="logo">👁 EyeScroll</div>
+  <div class="badge"><div class="dot" id="sDot"></div><span id="statusTxt">대기 중</span></div>
+  <div class="badge" style="margin-left:auto">FPS <span id="fpsN" style="color:var(--accent);margin-left:4px">0</span></div>
+</header>
+
+<div class="app">
+  <div class="panel">
+
+    <div class="sec">
+      <div class="sec-title">카메라</div>
+      <div class="cam-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div class="cam-tag">LIVE · MEDIAPIPE</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">눈 개방도</div>
+      <div class="eye-row">
+        <div class="eye-box">
+          <div class="eye-lbl">LEFT</div>
+          <div class="bar-bg"><div class="bar-fill" id="lBar"></div></div>
+          <div class="eye-num" id="lVal">--</div>
+        </div>
+        <div class="eye-box">
+          <div class="eye-lbl">RIGHT</div>
+          <div class="bar-bg"><div class="bar-fill" id="rBar"></div></div>
+          <div class="eye-num" id="rVal">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">시선 방향</div>
+      <div class="compass-wrap">
+        <div class="compass">
+          <svg viewBox="0 0 90 90">
+            <line x1="45" y1="8"  x2="45" y2="82" stroke="rgba(0,245,196,0.1)" stroke-width="1"/>
+            <line x1="8"  y1="45" x2="82" y2="45" stroke="rgba(0,245,196,0.1)" stroke-width="1"/>
+            <circle cx="45" cy="45" r="18" fill="none" stroke="rgba(0,245,196,0.07)" stroke-width="1"/>
+          </svg>
+          <div class="gaze-pt" id="gazePt"></div>
+        </div>
+        <div id="gazeLbl">--</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">설정</div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="ctrl-name">스크롤 속도</span><span class="ctrl-val" id="vSpeed">150</span></div>
+        <input type="range" id="sSpeed" min="50" max="500" value="150" step="10">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="ctrl-name">감도 임계값</span><span class="ctrl-val" id="vThresh">4</span></div>
+        <input type="range" id="sThresh" min="1" max="20" value="4" step="1">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="ctrl-name">딜레이 (ms)</span><span class="ctrl-val" id="vDelay">250</span></div>
+        <input type="range" id="sDelay" min="80" max="800" value="250" step="10">
+      </div>
+    </div>
+
+    <div class="sec">
+      <button class="btn btn-go" id="toggleBtn" disabled>모델 로딩 중...</button>
+      <button class="btn btn-reset" id="resetBtn">기준점 초기화</button>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">통계</div>
+      <div class="stats">
+        <div class="stat"><div class="stat-n" id="sUp">0</div><div class="stat-l">↑ 위 스크롤</div></div>
+        <div class="stat"><div class="stat-n" id="sDown">0</div><div class="stat-l">↓ 아래 스크롤</div></div>
+        <div class="stat"><div class="stat-n" id="sFrames">0</div><div class="stat-l">처리 프레임</div></div>
+        <div class="stat"><div class="stat-n" id="sBlinks">0</div><div class="stat-l">눈 깜빡임</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="content" id="scrollArea">
+    <h1>눈동자로<br>스크롤하세요</h1>
+    <p class="sub">MediaPipe Face Mesh로 실시간 눈동자 추적. 시선을 위/아래로 움직이면 페이지가 스크롤됩니다. 모든 처리는 브라우저 내에서만 이루어집니다.</p>
+
+    <div class="card"><div class="tag">기술</div><h2>MediaPipe Face Mesh로 눈 추적하기</h2><p>Google의 MediaPipe Face Mesh는 468개의 얼굴 랜드마크를 실시간으로 감지합니다. 홍채 주변의 특정 포인트들을 추적하여 눈의 수직 위치 변화를 계산하고, 이를 스크롤 명령으로 변환합니다.</p><div class="img-ph">🧠</div></div>
+
+    <div class="card"><div class="tag">접근성</div><h2>핸즈프리 인터페이스의 미래</h2><p>눈 추적 기술은 신체 장애가 있는 사용자들에게 큰 도움이 됩니다. 최근 AI 발전으로 별도 하드웨어 없이 웹캠만으로도 정밀한 시선 추적이 가능해졌습니다. 보조 기술의 새로운 가능성이 열리고 있습니다.</p><div class="img-ph">♿</div></div>
+
+    <div class="card"><div class="tag">사용법</div><h2>최적의 환경 만들기</h2><p>균일한 조명 아래에서 카메라와 40~60cm 거리를 유지하세요. 처음 시작할 때 정면을 바라보며 기준점을 잡아두면 더 정확하게 동작합니다. 감도가 너무 높으면 의도치 않은 스크롤이 발생할 수 있습니다.</p><div class="img-ph">💡</div></div>
+
+    <div class="card"><div class="tag">프라이버시</div><h2>완전한 로컬 처리</h2><p>이 앱은 모든 AI 연산을 브라우저 내에서만 처리합니다. 카메라 영상이나 얼굴 데이터는 외부 서버로 전송되지 않습니다. WebAssembly를 활용하여 빠른 추론 속도를 제공합니다.</p><div class="img-ph">🔒</div></div>
+
+    <div class="card"><div class="tag">팁</div><h2>더 잘 사용하는 방법</h2><p>눈을 크게 위아래로 움직일수록 더 잘 인식됩니다. "기준점 초기화" 버튼을 누르면 현재 시선 위치를 중립점으로 재설정합니다. 처음엔 감도를 낮게 설정한 후 익숙해지면 높여보세요.</p><div class="img-ph">🎯</div></div>
+
+    <div class="card"><div class="tag">원리</div><h2>눈동자 위치 계산 방법</h2><p>양쪽 홍채 중심의 Y 좌표 평균값을 첫 인식 시 기준값으로 저장합니다. 이후 변화량이 임계값을 초과하면 스크롤 명령을 실행합니다. 머리 기울기의 영향을 최소화하기 위해 양쪽 눈의 평균을 사용합니다.</p><div class="img-ph">📐</div></div>
+
+    <div style="padding:24px 0;text-align:center;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted)">── 끝 ──</div>
+  </div>
+</div>
+
+<script>
+// ── State
+let isTracking = false;
+let baseY = null;
+let lastScrollT = 0;
+let fpsCount = 0, fpsTimer = Date.now();
+let st = { up:0, down:0, frames:0, blinks:0 };
+let wasBlinking = false;
+let modelReady = false;
+
+// ── Settings
+let speed  = 150;
+let thresh = 4;
+let delay  = 250;
+
+const video      = document.getElementById('video');
+const canvas     = document.getElementById('overlay');
+const ctx        = canvas.getContext('2d');
+const scrollArea = document.getElementById('scrollArea');
+const toggleBtn  = document.getElementById('toggleBtn');
+
+// ── Sliders
+document.getElementById('sSpeed').oninput  = e => { speed  = +e.target.value; document.getElementById('vSpeed').textContent  = speed;  };
+document.getElementById('sThresh').oninput = e => { thresh = +e.target.value; document.getElementById('vThresh').textContent = thresh; baseY = null; };
+document.getElementById('sDelay').oninput  = e => { delay  = +e.target.value; document.getElementById('vDelay').textContent  = delay;  };
+document.getElementById('resetBtn').onclick = () => { baseY = null; };
+
+// ── Toggle
+toggleBtn.onclick = () => {
+  if (!modelReady) return;
+  isTracking = !isTracking;
+  if (isTracking) {
+    toggleBtn.textContent = '■ 추적 중지';
+    toggleBtn.className = 'btn btn-stop';
+    baseY = null;
+    setStatus('추적 중', 'green');
+  } else {
+    toggleBtn.textContent = '▶ 추적 시작';
+    toggleBtn.className = 'btn btn-go';
+    setStatus('일시정지', 'yellow');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+};
+
+function setStatus(txt, cls) {
+  document.getElementById('statusTxt').textContent = txt;
+  const d = document.getElementById('sDot');
+  d.className = 'dot' + (cls ? ' ' + cls : '');
+}
+
+function setLoad(pct, msg) {
+  document.getElementById('loadBar').style.width = pct + '%';
+  document.getElementById('loadMsg').innerHTML = msg;
+}
+
+// ── MediaPipe FaceMesh
+function onResults(results) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // FPS counter
+  fpsCount++;
+  const now = Date.now();
+  if (now - fpsTimer >= 1000) {
+    document.getElementById('fpsN').textContent = fpsCount;
+    fpsCount = 0; fpsTimer = now;
+  }
+
+  if (!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) {
+    document.getElementById('gazeLbl').textContent = '얼굴 없음';
+    setEyeBars(0, 0);
+    return;
+  }
+
+  const lm = results.multiFaceLandmarks[0];
+  st.frames++;
+  document.getElementById('sFrames').textContent = st.frames;
+
+  drawMesh(lm);
+
+  const lOpen = eyeOpen(lm, 'left');
+  const rOpen = eyeOpen(lm, 'right');
+  const avgOpen = (lOpen + rOpen) / 2;
+  setEyeBars(lOpen, rOpen);
+
+  if (avgOpen < 0.012) {
+    if (!wasBlinking) { st.blinks++; document.getElementById('sBlinks').textContent = st.blinks; }
+    wasBlinking = true;
+  } else {
+    wasBlinking = false;
+  }
+
+  // Iris landmarks: 468=left center, 473=right center
+  const lIris = lm[468], rIris = lm[473];
+  if (!lIris || !rIris) return;
+
+  const gazeY = (lIris.y + rIris.y) / 2;
+  const gazeX = (lIris.x + rIris.x) / 2;
+
+  // Compass dot
+  const dot = document.getElementById('gazePt');
+  dot.style.left = Math.max(5, Math.min(95, gazeX * 100)).toFixed(1) + '%';
+  dot.style.top  = Math.max(5, Math.min(95, gazeY * 100)).toFixed(1) + '%';
+
+  drawIris(lm, lIris, rIris);
+
+  if (!isTracking) return;
+
+  if (baseY === null) baseY = gazeY;
+
+  const delta = (gazeY - baseY) * 1000;
+  const canScroll = Date.now() - lastScrollT > delay;
+
+  if (Math.abs(delta) > thresh && canScroll && avgOpen > 0.008) {
+    doScroll(delta > 0 ? 'down' : 'up');
+    document.getElementById('gazeLbl').textContent =
+      delta > 0 ? `↓ 아래 (${delta.toFixed(0)})` : `↑ 위 (${delta.toFixed(0)})`;
+    lastScrollT = Date.now();
+  } else {
+    document.getElementById('gazeLbl').textContent =
+      Math.abs(delta) < thresh * 0.5 ? '정면' : (delta > 0 ? '↓ 약간' : '↑ 약간');
+  }
+}
+
+function eyeOpen(lm, side) {
+  const pts = side === 'left'
+    ? { top: [159, 158], bot: [145, 153] }
+    : { top: [386, 385], bot: [374, 380] };
+  const topY = pts.top.reduce((a, i) => a + lm[i].y, 0) / pts.top.length;
+  const botY = pts.bot.reduce((a, i) => a + lm[i].y, 0) / pts.bot.length;
+  return Math.abs(botY - topY);
+}
+
+function setEyeBars(l, r) {
+  const lp = Math.min(l * 1500, 100).toFixed(0);
+  const rp = Math.min(r * 1500, 100).toFixed(0);
+  document.getElementById('lBar').style.width = lp + '%';
+  document.getElementById('rBar').style.width = rp + '%';
+  document.getElementById('lVal').textContent  = lp + '%';
+  document.getElementById('rVal').textContent  = rp + '%';
+}
+
+function drawMesh(lm) {
+  const outline = [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10];
+  ctx.beginPath();
+  ctx.strokeStyle = 'rgba(0,245,196,0.22)';
+  ctx.lineWidth = 0.8;
+  outline.forEach((i, idx) => {
+    const x = lm[i].x * canvas.width;
+    const y = lm[i].y * canvas.height;
+    idx === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function drawIris(lm, lIris, rIris) {
+  [[lIris, lm[469], lm[471]], [rIris, lm[474], lm[476]]].forEach(([c, p1, p2]) => {
+    if (!c || !p1 || !p2) return;
+    const cx = c.x * canvas.width, cy = c.y * canvas.height;
+    const r  = Math.max(Math.hypot((p1.x-p2.x)*canvas.width, (p1.y-p2.y)*canvas.height) / 2, 4);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2);
+    ctx.strokeStyle = 'rgba(0,245,196,0.9)'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI*2);
+    ctx.fillStyle = 'var(--accent)'; ctx.fill();
+  });
+}
+
+function doScroll(dir) {
+  scrollArea.scrollBy({ top: dir === 'down' ? speed : -speed, behavior: 'smooth' });
+  if (dir === 'up') { st.up++;   document.getElementById('sUp').textContent   = st.up; }
+  else              { st.down++; document.getElementById('sDown').textContent = st.down; }
+  const flash = document.getElementById(dir === 'up' ? 'fUp' : 'fDown');
+  flash.classList.add('show');
+  setTimeout(() => flash.classList.remove('show'), 180);
+}
+
+// ── Init
+async function init() {
+  setLoad(10, '카메라 권한 요청 중...');
+
+  // Camera stream
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } });
+  } catch (e) {
+    document.getElementById('loadBar').style.background = 'var(--danger)';
+    setLoad(100, `<span style="color:var(--danger)">⚠ 카메라 권한 오류</span><br>
+      <span style="color:var(--muted);font-size:10px">
+        • 브라우저 주소창 왼쪽 자물쇠 클릭 → 카메라 허용<br>
+        • 로컬 파일(file://)은 Chrome에서 차단됨<br>
+        • VS Code Live Server 또는 로컬 서버 필요
+      </span>`);
+    return;
+  }
+
+  video.srcObject = stream;
+  await new Promise(r => { video.onloadedmetadata = r; });
+  canvas.width  = video.videoWidth  || 640;
+  canvas.height = video.videoHeight || 480;
+
+  setLoad(40, 'MediaPipe 모델 로딩 중...<br><span style="color:var(--muted);font-size:10px">최초 1회 다운로드 (10~30초)</span>');
+
+  const faceMesh = new FaceMesh({
+    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+  });
+
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence: 0.5,
+    minTrackingConfidence: 0.5
+  });
+
+  faceMesh.onResults(onResults);
+
+  setLoad(70, '카메라 스트림 연결 중...');
+
+  const camera = new Camera(video, {
+    onFrame: async () => {
+      await faceMesh.send({ image: video });
+    },
+    width: 640,
+    height: 480
+  });
+
+  await camera.start();
+
+  setLoad(100, '✓ 준비 완료!');
+  await new Promise(r => setTimeout(r, 600));
+
+  const ls = document.getElementById('loadScreen');
+  ls.style.opacity = '0';
+  setTimeout(() => ls.remove(), 450);
+
+  modelReady = true;
+  toggleBtn.disabled = false;
+  toggleBtn.textContent = '▶ 추적 시작';
+  setStatus('준비됨', 'yellow');
+}
+
+init();
+</script>
+</body>
+</html>
