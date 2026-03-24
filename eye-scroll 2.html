@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>👁 EyeScroll — 핸즈프리 뷰어</title>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&family=JetBrains+Mono:wght@400;700&display=swap');
+:root{--bg:#0c0c10;--panel:#13131a;--card:#1c1c26;--border:rgba(255,255,255,0.07);--accent:#00e5b0;--accent2:#6c63ff;--warn:#ffb347;--danger:#ff5757;--text:#eeeef5;--muted:#666680;--glow:0 0 18px rgba(0,229,176,0.35)}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Noto Sans KR',sans-serif}
+
+/* Loading */
+#loadScreen{position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity 0.5s}
+.load-iris{width:80px;height:80px;border-radius:50%;border:3px solid rgba(0,229,176,0.2);display:flex;align-items:center;justify-content:center;animation:irisGlow 2s ease-in-out infinite}
+@keyframes irisGlow{0%,100%{box-shadow:0 0 10px rgba(0,229,176,0.2)}50%{box-shadow:0 0 30px rgba(0,229,176,0.5)}}
+.load-pupil{width:32px;height:32px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0%,var(--accent2) 100%);animation:pupilBlink 3s ease-in-out infinite}
+@keyframes pupilBlink{0%,88%,100%{transform:scaleY(1)}94%{transform:scaleY(0.05)}}
+.load-title{font-size:22px;font-weight:900;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.load-bar-bg{width:200px;height:2px;background:rgba(255,255,255,0.07);border-radius:2px;overflow:hidden}
+.load-bar{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));width:0%;transition:width 0.3s}
+#loadMsg{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);text-align:center;max-width:280px;line-height:1.7}
+
+/* App */
+.app{display:flex;height:100vh}
+
+/* Sidebar */
+.sidebar{width:280px;min-width:280px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto;z-index:50;transition:transform 0.3s}
+.sidebar::-webkit-scrollbar{width:2px}
+.sidebar::-webkit-scrollbar-thumb{background:rgba(0,229,176,0.2);border-radius:1px}
+.sidebar.collapsed{transform:translateX(-280px);position:absolute;height:100%}
+.sidebar-toggle{position:fixed;left:0;top:50%;transform:translateY(-50%);z-index:60;background:var(--accent);color:#0c0c10;border:none;width:20px;height:56px;border-radius:0 8px 8px 0;cursor:pointer;font-size:11px;font-weight:900;display:none}
+
+.brand{padding:16px 14px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.brand-iris{width:36px;height:36px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0%,var(--accent2) 60%,transparent 100%);flex-shrink:0;box-shadow:var(--glow)}
+.brand-name{font-size:16px;font-weight:900;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.brand-sub{font-size:10px;color:var(--muted);margin-top:1px}
+
+.sec{padding:13px;border-bottom:1px solid var(--border)}
+.sec-title{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;margin-bottom:10px}
+
+.status-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0;transition:all 0.3s}
+.dot.green{background:var(--accent);box-shadow:0 0 8px var(--accent);animation:pulse 1.5s infinite}
+.dot.yellow{background:var(--warn);box-shadow:0 0 6px var(--warn)}
+.dot.red{background:var(--danger)}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.7)}}
+#statusTxt{font-size:12px;color:var(--text)}
+#fpsBadge{margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent)}
+
+.cam-wrap{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:4/3;border:1px solid rgba(0,229,176,0.15)}
+#video{width:100%;height:100%;object-fit:cover;transform:scaleX(-1);display:block}
+#overlay{position:absolute;top:0;left:0;width:100%;height:100%;transform:scaleX(-1);pointer-events:none}
+.cam-tag{position:absolute;bottom:6px;left:6px;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent);background:rgba(0,0,0,0.7);padding:2px 6px;border-radius:3px}
+
+.eye-row{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.eye-box{background:var(--card);border-radius:8px;padding:9px;border:1px solid var(--border)}
+.eye-lbl{font-size:9px;font-family:'JetBrains Mono',monospace;color:var(--muted);margin-bottom:5px}
+.bar-bg{height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;margin-bottom:4px}
+.bar-fill{height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width 0.08s}
+.eye-num{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700}
+
+.compass-wrap{display:flex;flex-direction:column;align-items:center;gap:8px}
+.compass{width:80px;height:80px;border:1.5px solid rgba(0,229,176,0.18);border-radius:50%;position:relative;background:radial-gradient(circle,rgba(0,229,176,0.03) 0%,transparent 70%)}
+.compass svg{position:absolute;inset:0}
+.gaze-pt{width:12px;height:12px;background:var(--accent);border-radius:50%;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:var(--glow);transition:all 0.1s ease-out}
+#gazeLbl{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent);letter-spacing:1px;min-height:14px}
+
+.ctrl{margin-bottom:10px}
+.ctrl:last-child{margin-bottom:0}
+.ctrl-head{display:flex;justify-content:space-between;margin-bottom:5px}
+.ctrl-name{font-size:11px;color:var(--text)}
+.ctrl-val{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--accent)}
+input[type=range]{-webkit-appearance:none;width:100%;height:3px;background:rgba(255,255,255,0.08);border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 5px var(--accent)}
+
+.mode-tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.mode-tab{padding:8px 4px;border:1px solid var(--border);border-radius:7px;background:var(--card);color:var(--muted);font-size:11px;font-family:'Noto Sans KR',sans-serif;cursor:pointer;text-align:center;transition:all 0.2s}
+.mode-tab.active{background:rgba(0,229,176,0.12);border-color:var(--accent);color:var(--accent);font-weight:700}
+
+.url-wrap{display:flex;gap:6px}
+#urlInput{flex:1;background:var(--card);border:1px solid var(--border);border-radius:7px;color:var(--text);font-size:11px;padding:7px 10px;font-family:'Noto Sans KR',sans-serif;outline:none;transition:border-color 0.2s}
+#urlInput:focus{border-color:var(--accent)}
+#urlInput::placeholder{color:var(--muted)}
+.btn-go-url{background:var(--accent);border:none;border-radius:7px;color:#0c0c10;font-weight:700;font-size:11px;padding:7px 10px;cursor:pointer}
+
+.quick-links{display:flex;flex-direction:column;gap:5px;margin-top:10px}
+.qlink{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--card);border:1px solid var(--border);cursor:pointer;transition:all 0.2s}
+.qlink:hover{border-color:var(--accent);background:rgba(0,229,176,0.06)}
+.qlink-icon{font-size:16px;flex-shrink:0}
+.qlink-name{font-size:12px;font-weight:700;color:var(--text)}
+.qlink-url{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+
+.warn-box{margin-top:10px;padding:10px;background:rgba(255,183,71,0.07);border:1px solid rgba(255,183,71,0.2);border-radius:8px}
+.warn-box-title{font-size:10px;color:var(--warn);font-weight:700;margin-bottom:4px}
+.warn-box-body{font-size:10px;color:var(--muted);line-height:1.6}
+
+.btn{width:100%;padding:11px;border:none;border-radius:8px;font-family:'Noto Sans KR',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all 0.2s}
+.btn:disabled{opacity:0.45;cursor:not-allowed}
+.btn-start{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#0c0c10}
+.btn-start:not(:disabled):hover{transform:translateY(-1px);box-shadow:0 5px 16px rgba(0,229,176,0.3)}
+.btn-stop{background:linear-gradient(135deg,var(--danger),var(--warn));color:#0c0c10}
+.btn-sm{background:var(--card);border:1px solid var(--border);color:var(--muted);font-size:11px;margin-top:6px;padding:8px}
+.btn-sm:hover{color:var(--text)}
+
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.stat{background:var(--card);border-radius:7px;padding:8px 10px;border:1px solid var(--border)}
+.stat-n{font-family:'JetBrains Mono',monospace;font-size:17px;font-weight:700;color:var(--accent)}
+.stat-l{font-size:9px;color:var(--muted);margin-top:1px}
+
+/* Viewer */
+.viewer-area{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative;min-width:0}
+.viewer-toolbar{background:var(--panel);border-bottom:1px solid var(--border);padding:8px 14px;display:flex;align-items:center;gap:10px;flex-shrink:0;height:46px}
+.toolbar-title{font-size:13px;font-weight:700;color:var(--text);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toolbar-badge{font-family:'JetBrains Mono',monospace;font-size:10px;background:rgba(0,229,176,0.1);border:1px solid rgba(0,229,176,0.2);color:var(--accent);padding:3px 8px;border-radius:4px;white-space:nowrap}
+
+.iframe-wrap{flex:1;position:relative;overflow:hidden;display:none}
+#siteFrame{width:100%;height:100%;border:none;display:block;background:#fff}
+
+.iframe-blocked{position:absolute;inset:0;background:var(--bg);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:40px;text-align:center}
+.iframe-blocked.show{display:flex}
+.blocked-icon{font-size:48px}
+.blocked-title{font-size:18px;font-weight:700}
+.blocked-desc{font-size:13px;color:var(--muted);max-width:380px;line-height:1.7}
+.blocked-steps{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;max-width:380px;width:100%;text-align:left}
+.blocked-step{display:flex;gap:10px;margin-bottom:10px;font-size:12px;color:var(--text);line-height:1.6}
+.blocked-step:last-child{margin-bottom:0}
+.blocked-step-num{width:22px;height:22px;border-radius:50%;background:var(--accent);color:#0c0c10;font-weight:700;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.blocked-link{display:inline-block;margin-top:4px;padding:10px 20px;background:var(--accent);color:#0c0c10;border-radius:8px;font-weight:700;font-size:13px;text-decoration:none}
+
+/* Demo area */
+.demo-area{flex:1;overflow-y:auto;padding:28px 36px;background:var(--bg)}
+.demo-area::-webkit-scrollbar{width:3px}
+.demo-area::-webkit-scrollbar-thumb{background:rgba(0,229,176,0.2);border-radius:2px}
+.demo-area h1{font-size:clamp(22px,3vw,38px);font-weight:900;letter-spacing:-1px;line-height:1.1;background:linear-gradient(135deg,var(--text) 40%,var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:10px}
+.demo-area .sub{color:var(--muted);font-size:13px;line-height:1.7;max-width:500px;margin-bottom:28px}
+
+.how-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px}
+.how-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;text-align:center}
+.how-card-icon{font-size:26px;margin-bottom:8px}
+.how-card-num{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent);letter-spacing:1px;margin-bottom:4px}
+.how-card-desc{font-size:11px;color:var(--muted);line-height:1.5}
+
+.content-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px;margin-bottom:14px;transition:border-color 0.3s}
+.content-card:hover{border-color:rgba(0,229,176,0.2)}
+.c-tag{display:inline-block;font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--accent);background:rgba(0,229,176,0.07);border:1px solid rgba(0,229,176,0.18);border-radius:3px;padding:2px 7px;margin-bottom:9px;text-transform:uppercase;letter-spacing:1px}
+.content-card h2{font-size:16px;font-weight:700;margin-bottom:8px}
+.content-card p{color:var(--muted);font-size:13px;line-height:1.7}
+.c-img{height:110px;background:linear-gradient(135deg,rgba(108,99,255,0.12),rgba(0,229,176,0.06));border-radius:8px;margin-top:12px;display:flex;align-items:center;justify-content:center;font-size:32px;border:1px solid var(--border)}
+
+/* Overlays */
+.flash{position:fixed;pointer-events:none;z-index:200;opacity:0;transition:opacity 0.12s}
+#fUp{background:linear-gradient(to bottom,rgba(0,229,176,0.1),transparent 35%)}
+#fDown{background:linear-gradient(to top,rgba(108,99,255,0.1),transparent 35%)}
+.flash.show{opacity:1}
+
+#gazeOverlay{position:fixed;pointer-events:none;z-index:100;width:36px;height:36px;border-radius:50%;border:2px solid var(--accent);box-shadow:var(--glow);transform:translate(-50%,-50%);display:none;transition:left 0.08s ease-out,top 0.08s ease-out}
+#gazeOverlay.visible{display:block}
+#gazeOverlay::after{content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:7px;height:7px;border-radius:50%;background:var(--accent)}
+
+#scrollHUD{position:fixed;right:14px;top:50%;transform:translateY(-50%);z-index:150;display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none}
+.hud-arrow{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;background:rgba(0,0,0,0.5);border:1px solid var(--border);transition:all 0.15s}
+.hud-arrow.active-up{background:rgba(0,229,176,0.2);border-color:var(--accent);box-shadow:var(--glow)}
+.hud-arrow.active-down{background:rgba(108,99,255,0.2);border-color:var(--accent2);box-shadow:0 0 16px rgba(108,99,255,0.35)}
+
+@media(max-width:768px){
+  .sidebar{position:absolute;height:100%}
+  .sidebar.collapsed{transform:translateX(-280px)}
+  .sidebar-toggle{display:flex;align-items:center;justify-content:center}
+}
+</style>
+</head>
+<body>
+
+<div id="loadScreen">
+  <div class="load-iris"><div class="load-pupil"></div></div>
+  <div class="load-title">EyeScroll</div>
+  <div class="load-bar-bg"><div class="load-bar" id="loadBar"></div></div>
+  <div id="loadMsg">초기화 중...</div>
+</div>
+
+<div id="gazeOverlay"></div>
+<div class="flash" id="fUp" style="top:46px;left:280px;right:0;bottom:0"></div>
+<div class="flash" id="fDown" style="top:46px;left:280px;right:0;bottom:0"></div>
+
+<div id="scrollHUD">
+  <div class="hud-arrow" id="hudUp">▲</div>
+  <div class="hud-arrow" id="hudDown">▼</div>
+</div>
+
+<button class="sidebar-toggle" id="sidebarToggle">◀</button>
+
+<div class="app">
+
+  <!-- SIDEBAR -->
+  <div class="sidebar" id="sidebar">
+
+    <div class="brand">
+      <div class="brand-iris"></div>
+      <div>
+        <div class="brand-name">EyeScroll</div>
+        <div class="brand-sub">핸즈프리 웹 뷰어</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">카메라 & 상태</div>
+      <div class="status-row">
+        <div class="dot" id="sDot"></div>
+        <span id="statusTxt">대기 중</span>
+        <span id="fpsBadge">FPS <span id="fpsN">0</span></span>
+      </div>
+      <div class="cam-wrap">
+        <video id="video" autoplay muted playsinline></video>
+        <canvas id="overlay"></canvas>
+        <div class="cam-tag">LIVE · MEDIAPIPE</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">눈 개방도</div>
+      <div class="eye-row">
+        <div class="eye-box">
+          <div class="eye-lbl">LEFT</div>
+          <div class="bar-bg"><div class="bar-fill" id="lBar"></div></div>
+          <div class="eye-num" id="lVal">--</div>
+        </div>
+        <div class="eye-box">
+          <div class="eye-lbl">RIGHT</div>
+          <div class="bar-bg"><div class="bar-fill" id="rBar"></div></div>
+          <div class="eye-num" id="rVal">--</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">시선 방향</div>
+      <div class="compass-wrap">
+        <div class="compass">
+          <svg viewBox="0 0 80 80">
+            <line x1="40" y1="7" x2="40" y2="73" stroke="rgba(0,229,176,0.1)" stroke-width="1"/>
+            <line x1="7" y1="40" x2="73" y2="40" stroke="rgba(0,229,176,0.1)" stroke-width="1"/>
+            <circle cx="40" cy="40" r="16" fill="none" stroke="rgba(0,229,176,0.07)" stroke-width="1"/>
+          </svg>
+          <div class="gaze-pt" id="gazePt"></div>
+        </div>
+        <div id="gazeLbl">--</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">뷰어 모드</div>
+      <div class="mode-tabs">
+        <div class="mode-tab active" id="modeDemo" onclick="setMode('demo')">📄 데모</div>
+        <div class="mode-tab" id="modeWeb" onclick="setMode('web')">🌐 웹사이트</div>
+      </div>
+    </div>
+
+    <div class="sec" id="urlSec" style="display:none">
+      <div class="sec-title">URL 입력</div>
+      <div class="url-wrap">
+        <input type="url" id="urlInput" placeholder="https://..." />
+        <button class="btn-go-url" onclick="loadURL()">이동</button>
+      </div>
+      <div class="quick-links">
+        <div class="qlink" onclick="goSite('https://comic.naver.com/webtoon')">
+          <span class="qlink-icon">📚</span>
+          <div><div class="qlink-name">네이버 웹툰</div><div class="qlink-url">comic.naver.com</div></div>
+        </div>
+        <div class="qlink" onclick="goSite('https://webtoon.kakao.com')">
+          <span class="qlink-icon">🎨</span>
+          <div><div class="qlink-name">카카오 웹툰</div><div class="qlink-url">webtoon.kakao.com</div></div>
+        </div>
+        <div class="qlink" onclick="goSite('https://m.comic.naver.com/webtoon')">
+          <span class="qlink-icon">📱</span>
+          <div><div class="qlink-name">네이버 웹툰 (모바일)</div><div class="qlink-url">m.comic.naver.com</div></div>
+        </div>
+        <div class="qlink" onclick="goSite('https://news.naver.com')">
+          <span class="qlink-icon">📰</span>
+          <div><div class="qlink-name">네이버 뉴스</div><div class="qlink-url">news.naver.com</div></div>
+        </div>
+        <div class="qlink" onclick="goSite('https://namu.wiki')">
+          <span class="qlink-icon">📖</span>
+          <div><div class="qlink-name">나무위키</div><div class="qlink-url">namu.wiki</div></div>
+        </div>
+      </div>
+      <div class="warn-box">
+        <div class="warn-box-title">⚠ 참고</div>
+        <div class="warn-box-body">보안 정책으로 일부 사이트는 차단될 수 있습니다. 그럴 경우 안내에 따라 새 탭에서 여세요.</div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">설정</div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="ctrl-name">스크롤 속도</span><span class="ctrl-val" id="vSpeed">200</span></div>
+        <input type="range" id="sSpeed" min="50" max="600" value="200" step="10" oninput="speed=+this.value;document.getElementById('vSpeed').textContent=speed">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="ctrl-name">감도 임계값</span><span class="ctrl-val" id="vThresh">4</span></div>
+        <input type="range" id="sThresh" min="1" max="20" value="4" step="1" oninput="thresh=+this.value;document.getElementById('vThresh').textContent=thresh;baseY=null">
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head"><span class="ctrl-name">딜레이 (ms)</span><span class="ctrl-val" id="vDelay">200</span></div>
+        <input type="range" id="sDelay" min="50" max="700" value="200" step="10" oninput="delay=+this.value;document.getElementById('vDelay').textContent=delay">
+      </div>
+    </div>
+
+    <div class="sec">
+      <button class="btn btn-start" id="toggleBtn" disabled>모델 로딩 중...</button>
+      <button class="btn btn-sm" onclick="baseY=null">기준점 초기화</button>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title">통계</div>
+      <div class="stats">
+        <div class="stat"><div class="stat-n" id="sUp">0</div><div class="stat-l">↑ 위 스크롤</div></div>
+        <div class="stat"><div class="stat-n" id="sDown">0</div><div class="stat-l">↓ 아래 스크롤</div></div>
+        <div class="stat"><div class="stat-n" id="sFrames">0</div><div class="stat-l">처리 프레임</div></div>
+        <div class="stat"><div class="stat-n" id="sBlinks">0</div><div class="stat-l">눈 깜빡임</div></div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- VIEWER -->
+  <div class="viewer-area">
+    <div class="viewer-toolbar">
+      <div class="toolbar-title" id="toolbarTitle">👁 EyeScroll — 핸즈프리 웹 뷰어</div>
+      <div class="toolbar-badge" id="modeBadge">데모 모드</div>
+    </div>
+
+    <!-- Demo -->
+    <div class="demo-area" id="demoArea">
+      <h1>눈동자로<br>웹을 탐험하세요</h1>
+      <p class="sub">시선을 위/아래로 움직이면 스크롤됩니다. 왼쪽 패널에서 "웹사이트" 모드로 전환해 네이버 웹툰 등을 눈으로 읽어보세요.</p>
+
+      <div class="how-grid">
+        <div class="how-card"><div class="how-card-icon">📷</div><div class="how-card-num">STEP 01</div><div class="how-card-desc">카메라 허용 후 로딩 대기</div></div>
+        <div class="how-card"><div class="how-card-icon">▶️</div><div class="how-card-num">STEP 02</div><div class="how-card-desc">추적 시작 버튼 클릭</div></div>
+        <div class="how-card"><div class="how-card-icon">👁</div><div class="how-card-num">STEP 03</div><div class="how-card-desc">눈을 위/아래로 움직이기</div></div>
+        <div class="how-card"><div class="how-card-icon">🌐</div><div class="how-card-num">STEP 04</div><div class="how-card-desc">웹 모드에서 원하는 사이트</div></div>
+      </div>
+
+      <div class="content-card"><div class="c-tag">웹툰 호환</div><h2>네이버·카카오 웹툰을 눈으로 읽기</h2><p>왼쪽에서 "웹사이트" 모드 전환 후 추천 사이트를 선택하세요. 손 없이 눈동자만으로 웹툰을 스크롤하며 읽을 수 있습니다.</p><div class="c-img">📚</div></div>
+      <div class="content-card"><div class="c-tag">활용 시나리오</div><h2>이런 상황에서 유용해요</h2><p>손에 음식을 들고 레시피 보기, 운동 중 영상 보기, 신체 장애로 손 사용이 어려운 분들의 일상적인 웹 탐색, 발표 중 슬라이드 넘기기 등 다양하게 활용 가능합니다.</p><div class="c-img">🎯</div></div>
+      <div class="content-card"><div class="c-tag">기술</div><h2>MediaPipe Face Mesh AI</h2><p>Google의 MediaPipe가 468개 얼굴 랜드마크를 실시간 감지합니다. 홍채 중심의 Y축 변화량으로 스크롤 방향을 결정하며, 모든 연산은 브라우저 내에서만 처리됩니다.</p><div class="c-img">🧠</div></div>
+      <div style="padding:18px 0;text-align:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)">── 끝 ──</div>
+    </div>
+
+    <!-- Iframe -->
+    <div class="iframe-wrap" id="iframeWrap">
+      <iframe id="siteFrame" allow="camera;microphone"></iframe>
+      <div class="iframe-blocked" id="iframeBlocked">
+        <div class="blocked-icon">🚫</div>
+        <div class="blocked-title">이 사이트는 직접 표시가 차단됩니다</div>
+        <div class="blocked-desc">보안 정책으로 이 사이트는 내부에서 열 수 없습니다.<br>아래 방법을 따라 사용하세요.</div>
+        <div class="blocked-steps">
+          <div class="blocked-step"><div class="blocked-step-num">1</div><div>아래 버튼을 눌러 사이트를 <b>새 탭</b>에서 여세요</div></div>
+          <div class="blocked-step"><div class="blocked-step-num">2</div><div>새 탭에서 읽고 싶은 웹툰 화면으로 이동하세요</div></div>
+          <div class="blocked-step"><div class="blocked-step-num">3</div><div>이 EyeScroll 탭으로 돌아와 <b>추적 시작</b>을 누르세요</div></div>
+          <div class="blocked-step"><div class="blocked-step-num">4</div><div>아이패드 <b>슬라이드 오버</b> 또는 <b>Split View</b>로 두 화면을 나란히 띄우세요</div></div>
+        </div>
+        <a class="blocked-link" id="blockedOpenLink" href="#" target="_blank">↗ 새 탭에서 열기</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+let isTracking=false,baseY=null,lastScrollT=0;
+let fpsCount=0,fpsTimer=Date.now();
+let st={up:0,down:0,frames:0,blinks:0};
+let wasBlinking=false,modelReady=false;
+let currentMode='demo';
+let speed=200,thresh=4,delay=200;
+
+const video=document.getElementById('video');
+const canvas=document.getElementById('overlay');
+const ctx=canvas.getContext('2d');
+const toggleBtn=document.getElementById('toggleBtn');
+
+// Mode
+function setMode(m){
+  currentMode=m;
+  document.getElementById('modeDemo').classList.toggle('active',m==='demo');
+  document.getElementById('modeWeb').classList.toggle('active',m==='web');
+  document.getElementById('urlSec').style.display=m==='web'?'block':'none';
+  document.getElementById('demoArea').style.display=m==='demo'?'block':'none';
+  document.getElementById('iframeWrap').style.display=m==='web'?'flex':'none';
+  document.getElementById('modeBadge').textContent=m==='demo'?'데모 모드':'웹 모드';
+  const sW=document.getElementById('sidebar').offsetWidth;
+  ['fUp','fDown'].forEach(id=>{
+    const el=document.getElementById(id);
+    el.style.left=sW+'px'; el.style.top='46px'; el.style.right='0'; el.style.bottom='0';
+  });
+}
+
+function loadURL(){
+  let url=document.getElementById('urlInput').value.trim();
+  if(!url)return;
+  if(!url.startsWith('http'))url='https://'+url;
+  goSite(url);
+}
+
+function goSite(url){
+  setMode('web');
+  document.getElementById('urlInput').value=url;
+  const frame=document.getElementById('siteFrame');
+  const blocked=document.getElementById('iframeBlocked');
+  blocked.classList.remove('show');
+  frame.style.display='block';
+  document.getElementById('toolbarTitle').textContent='🌐 '+url;
+  frame.src=url;
+
+  // Detect X-Frame-Options block after timeout
+  let loaded=false;
+  frame.onload=()=>{
+    try{
+      const doc=frame.contentDocument||frame.contentWindow.document;
+      if(doc&&doc.URL!=='about:blank')loaded=true;
+      else showBlocked(url);
+    }catch(e){ showBlocked(url); }
+  };
+  setTimeout(()=>{ if(!loaded) showBlocked(url); },5000);
+}
+
+function showBlocked(url){
+  document.getElementById('siteFrame').style.display='none';
+  const b=document.getElementById('iframeBlocked');
+  b.classList.add('show');
+  document.getElementById('blockedOpenLink').href=url;
+  document.getElementById('toolbarTitle').textContent='🚫 차단됨 — '+url.replace('https://','');
+}
+
+// Sidebar toggle
+let sidebarOpen=true;
+document.getElementById('sidebarToggle').onclick=()=>{
+  sidebarOpen=!sidebarOpen;
+  document.getElementById('sidebar').classList.toggle('collapsed',!sidebarOpen);
+  document.getElementById('sidebarToggle').textContent=sidebarOpen?'◀':'▶';
+};
+
+// Toggle tracking
+toggleBtn.onclick=()=>{
+  if(!modelReady)return;
+  isTracking=!isTracking;
+  if(isTracking){
+    toggleBtn.textContent='■ 추적 중지';
+    toggleBtn.className='btn btn-stop';
+    baseY=null;
+    setStatus('추적 중','green');
+  }else{
+    toggleBtn.textContent='▶ 추적 시작';
+    toggleBtn.className='btn btn-start';
+    setStatus('일시정지','yellow');
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    document.getElementById('gazeOverlay').classList.remove('visible');
+  }
+};
+
+function setStatus(txt,cls){
+  document.getElementById('statusTxt').textContent=txt;
+  const d=document.getElementById('sDot');
+  d.className='dot'+(cls?' '+cls:'');
+}
+function setLoad(pct,msg){
+  document.getElementById('loadBar').style.width=pct+'%';
+  document.getElementById('loadMsg').innerHTML=msg;
+}
+
+// Face mesh results
+function onResults(results){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  fpsCount++;
+  const now=Date.now();
+  if(now-fpsTimer>=1000){document.getElementById('fpsN').textContent=fpsCount;fpsCount=0;fpsTimer=now;}
+
+  if(!results.multiFaceLandmarks?.length){
+    document.getElementById('gazeLbl').textContent='얼굴 없음';
+    setEyeBars(0,0);
+    document.getElementById('gazeOverlay').classList.remove('visible');
+    return;
+  }
+
+  const lm=results.multiFaceLandmarks[0];
+  st.frames++;
+  document.getElementById('sFrames').textContent=st.frames;
+  drawMesh(lm);
+
+  const lO=eyeOpen(lm,'left'),rO=eyeOpen(lm,'right'),avg=(lO+rO)/2;
+  setEyeBars(lO,rO);
+
+  if(avg<0.012){if(!wasBlinking){st.blinks++;document.getElementById('sBlinks').textContent=st.blinks;}wasBlinking=true;}
+  else wasBlinking=false;
+
+  const lI=lm[468],rI=lm[473];
+  if(!lI||!rI)return;
+
+  const gY=(lI.y+rI.y)/2,gX=(lI.x+rI.x)/2;
+  const pt=document.getElementById('gazePt');
+  pt.style.left=Math.max(5,Math.min(95,gX*100)).toFixed(1)+'%';
+  pt.style.top=Math.max(5,Math.min(95,gY*100)).toFixed(1)+'%';
+
+  // Screen gaze dot
+  if(isTracking){
+    const go=document.getElementById('gazeOverlay');
+    go.classList.add('visible');
+    const sb=document.getElementById('sidebar');
+    const sW=sidebarOpen?sb.offsetWidth:0;
+    go.style.left=(sW+gX*(window.innerWidth-sW))+'px';
+    go.style.top=(gY*window.innerHeight)+'px';
+  }
+
+  drawIris(lm,lI,rI);
+  if(!isTracking)return;
+
+  if(baseY===null)baseY=gY;
+  const delta=(gY-baseY)*1000;
+  const canScroll=Date.now()-lastScrollT>delay;
+
+  if(Math.abs(delta)>thresh&&canScroll&&avg>0.008){
+    const dir=delta>0?'down':'up';
+    doScroll(dir);
+    document.getElementById('gazeLbl').textContent=dir==='down'?`↓ 아래 (${delta.toFixed(0)})`:`↑ 위 (${delta.toFixed(0)})`;
+    lastScrollT=Date.now();
+  }else{
+    document.getElementById('gazeLbl').textContent=Math.abs(delta)<thresh*0.5?'정면':(delta>0?'↓ 약간':'↑ 약간');
+  }
+}
+
+function eyeOpen(lm,side){
+  const p=side==='left'?{top:[159,158],bot:[145,153]}:{top:[386,385],bot:[374,380]};
+  const tY=p.top.reduce((a,i)=>a+lm[i].y,0)/p.top.length;
+  const bY=p.bot.reduce((a,i)=>a+lm[i].y,0)/p.bot.length;
+  return Math.abs(bY-tY);
+}
+
+function setEyeBars(l,r){
+  const lp=Math.min(l*1500,100).toFixed(0),rp=Math.min(r*1500,100).toFixed(0);
+  document.getElementById('lBar').style.width=lp+'%';
+  document.getElementById('rBar').style.width=rp+'%';
+  document.getElementById('lVal').textContent=lp+'%';
+  document.getElementById('rVal').textContent=rp+'%';
+}
+
+function drawMesh(lm){
+  const o=[10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10];
+  ctx.beginPath();ctx.strokeStyle='rgba(0,229,176,0.2)';ctx.lineWidth=0.8;
+  o.forEach((i,idx)=>{const x=lm[i].x*canvas.width,y=lm[i].y*canvas.height;idx===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
+  ctx.stroke();
+}
+
+function drawIris(lm,lI,rI){
+  [[lI,lm[469],lm[471]],[rI,lm[474],lm[476]]].forEach(([c,p1,p2])=>{
+    if(!c||!p1||!p2)return;
+    const cx=c.x*canvas.width,cy=c.y*canvas.height;
+    const r=Math.max(Math.hypot((p1.x-p2.x)*canvas.width,(p1.y-p2.y)*canvas.height)/2,4);
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.strokeStyle='rgba(0,229,176,0.9)';ctx.lineWidth=1.5;ctx.stroke();
+    ctx.beginPath();ctx.arc(cx,cy,2.5,0,Math.PI*2);ctx.fillStyle='#00e5b0';ctx.fill();
+  });
+}
+
+function doScroll(dir){
+  const amt=dir==='down'?speed:-speed;
+  if(currentMode==='demo'){
+    document.getElementById('demoArea').scrollBy({top:amt,behavior:'smooth'});
+  }else{
+    try{
+      document.getElementById('siteFrame').contentWindow.scrollBy({top:amt,behavior:'smooth'});
+    }catch(e){
+      document.getElementById('iframeWrap').scrollBy({top:amt,behavior:'smooth'});
+    }
+  }
+  if(dir==='up'){st.up++;document.getElementById('sUp').textContent=st.up;}
+  else{st.down++;document.getElementById('sDown').textContent=st.down;}
+
+  const flash=document.getElementById(dir==='up'?'fUp':'fDown');
+  flash.classList.add('show');
+  setTimeout(()=>flash.classList.remove('show'),180);
+
+  const hud=document.getElementById(dir==='up'?'hudUp':'hudDown');
+  hud.classList.add(dir==='up'?'active-up':'active-down');
+  setTimeout(()=>hud.classList.remove('active-up','active-down'),300);
+}
+
+// Init
+async function init(){
+  setLoad(10,'카메라 권한 요청 중...');
+  let stream;
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}});
+  }catch(e){
+    document.getElementById('loadBar').style.background='var(--danger)';
+    setLoad(100,`<span style="color:var(--danger)">⚠ 카메라 오류</span><br><span style="color:var(--muted);font-size:10px">브라우저에서 카메라 권한을 허용해주세요<br>로컬 파일(file://)은 서버가 필요합니다</span>`);
+    return;
+  }
+  video.srcObject=stream;
+  await new Promise(r=>{video.onloadedmetadata=r;});
+  canvas.width=video.videoWidth||640;
+  canvas.height=video.videoHeight||480;
+
+  setLoad(40,'MediaPipe 모델 로딩 중...<br><span style="color:var(--muted);font-size:10px">최초 1회 10~30초 소요</span>');
+
+  const faceMesh=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  faceMesh.setOptions({maxNumFaces:1,refineLandmarks:true,minDetectionConfidence:0.5,minTrackingConfidence:0.5});
+  faceMesh.onResults(onResults);
+
+  setLoad(70,'카메라 스트림 연결 중...');
+  const camera=new Camera(video,{onFrame:async()=>{await faceMesh.send({image:video});},width:640,height:480});
+  await camera.start();
+
+  setLoad(100,'✓ 준비 완료!');
+  await new Promise(r=>setTimeout(r,600));
+  const ls=document.getElementById('loadScreen');
+  ls.style.opacity='0';
+  setTimeout(()=>ls.remove(),450);
+
+  modelReady=true;
+  toggleBtn.disabled=false;
+  toggleBtn.textContent='▶ 추적 시작';
+  setStatus('준비됨','yellow');
+}
+
+init();
+</script>
+</body>
+</html>
